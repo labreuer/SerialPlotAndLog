@@ -174,25 +174,37 @@ namespace SerialPlotAndLog
                 if (!port.IsOpen)
                     return;
 
-                port.BaseStream.BeginRead(buffer, 0, buffer.Length, delegate (IAsyncResult ar)
+                try
                 {
-                    try
+                    port.BaseStream.BeginRead(buffer, 0, buffer.Length, delegate (IAsyncResult ar)
                     {
-                        // this can get called after the port is closed
-                        if (_abortReading)
-                            return;
-                        int actualLength = port.BaseStream.EndRead(ar);
-                        byte[] received = new byte[actualLength];
-                        Buffer.BlockCopy(buffer, 0, received, 0, actualLength);
-                        receive(received);
-                    }
-                    catch (IOException exc)
-                    {
-                        error(exc);
-                    }
-                    kickoffRead();
-                }, null);
-			};
+                        try
+                        {
+                            // this can get called after the port is closed
+                            if (_abortReading)
+                                return;
+                            int actualLength = port.BaseStream.EndRead(ar);
+                            byte[] received = new byte[actualLength];
+                            Buffer.BlockCopy(buffer, 0, received, 0, actualLength);
+                            receive(received);
+                        }
+                        catch (IOException ex)
+                        {
+                            error(ex);
+                        }
+                        kickoffRead();
+                    }, null);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    // this happens if the port is closed due to e.g. changing the baud rate or port
+                    // there is perhaps a better way to do this
+                    if (ex.Message == "The BaseStream is only available when the port is open.")
+                        return;
+                    else
+                        error(ex);
+                }
+            };
 			kickoffRead();
 		}
 
