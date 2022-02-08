@@ -125,6 +125,8 @@ namespace SerialPlotAndLog
                         for (int i = 0; i <= lines.Length - 2; i++)
                         {
                             lastData.Text = lines[i];
+                            if (lines[i].StartsWith("#"))
+                                continue;
                             var x = Regex.Split(lines[i], " *, *");
                             for (int j = 0; j < x.Length; j++)
                             {
