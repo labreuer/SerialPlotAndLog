@@ -19,8 +19,8 @@ namespace SerialPlotAndLog
 	{
         private string _serialPortName;
         private string _baudRate;
-        private static Mutex _mutex = new Mutex();
         private static bool _abortReading = false;
+        private static IAsyncResult _asyncResult = null;
 
 		public frmMain(string serialPortName, string baud)
 		{
@@ -45,10 +45,12 @@ namespace SerialPlotAndLog
             if (_ser != null && _ser.IsOpen)
             {
                 _abortReading = true;
-                _mutex.WaitOne();
+                // strictly speaking we could just let the async operation in SetupDataReceive error out;
+                // it will anyway if the COM device is removed in the middle of a read
+                if (_asyncResult != null && !_asyncResult.IsCompleted)
+                    _asyncResult.AsyncWaitHandle.WaitOne(500);
                 _ser.Close();
                 _ser.Dispose();
-                _mutex.ReleaseMutex();
                 _abortReading = false;
             }
             if (_fs != null)
@@ -103,8 +105,18 @@ namespace SerialPlotAndLog
                     chart.Series.Add(newS);
                     return newS;
                 });
-            _ser = new SerialPort(portName, baudRate);
-            _ser.Open();
+
+            try
+            {
+                _ser = new SerialPort(portName, baudRate);
+                _ser.Open();
+            }
+            catch (Exception ex)
+            {
+                error.Text = ex.Message;
+                return;
+            }
+
             string residual = "";
 
             try
@@ -176,7 +188,7 @@ namespace SerialPlotAndLog
                 if (!port.IsOpen)
                     return;
 
-                port.BaseStream.BeginRead(buffer, 0, buffer.Length, delegate (IAsyncResult ar)
+                _asyncResult = port.BaseStream.BeginRead(buffer, 0, buffer.Length, delegate (IAsyncResult ar)
                 {
                     try
                     {
@@ -194,8 +206,8 @@ namespace SerialPlotAndLog
                     }
                     catch (InvalidOperationException ex)
                     {
-                        // this happens if the port is closed due to e.g. changing the baud rate or port
-                        // there is perhaps a better way to do this
+                        // this happens if the port is closed due to e.g. changing the baud rate or port;
+                        // even if we avoid that via using _asyncResult, someone could physically remove the device
                         if (ex.Message == "The BaseStream is only available when the port is open.")
                             return;
                         else
