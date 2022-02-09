@@ -21,26 +21,26 @@ namespace SerialPlotAndLog
         public string BaudRate { get; set; }
     }
 
-	public partial class frmMain : Form
-	{
+    public partial class frmMain : Form
+    {
         private SerialPortInfo _args;
         private SaveFileDialog _current;
         private static bool _abortReading = false;
         private static IAsyncResult _asyncResult = null;
 
-		public frmMain(SerialPortInfo args)
-		{
+        public frmMain(SerialPortInfo args)
+        {
             _args = args;
 
             InitializeComponent();
-			this.Load += frmMain_Load;
-			this.FormClosing += frmMain_FormClosing;
-		}
+            this.Load += frmMain_Load;
+            this.FormClosing += frmMain_FormClosing;
+        }
 
-		private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
-		{
+        private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
+        {
             CloseHandles();
-		}
+        }
 
         private SerialPort _ser;
         private FileStream _fs = null;
@@ -186,10 +186,10 @@ namespace SerialPlotAndLog
         }
 
         private static void SetupDataReceive(SerialPort port, Action<byte[]> receive, Action<Exception> error)
-		{
-			byte[] buffer = new byte[10];
-			Action kickoffRead = null;
-			kickoffRead = delegate {
+        {
+            byte[] buffer = new byte[10];
+            Action kickoffRead = null;
+            kickoffRead = delegate {
                 if (!port.IsOpen)
                     return;
 
@@ -221,8 +221,8 @@ namespace SerialPlotAndLog
                     kickoffRead();
                 }, null);
             };
-			kickoffRead();
-		}
+            kickoffRead();
+        }
 
         private string LoadPorts(string selectedPort)
         {

@@ -8,8 +8,8 @@ using System.Runtime.InteropServices;
 
 namespace SerialPlotAndLog
 {
-	static class Program
-	{
+    static class Program
+    {
         [DllImport("kernel32.dll")]
         static extern bool AttachConsole(int dwProcessId);
         private const int ATTACH_PARENT_PROCESS = -1;
@@ -18,8 +18,8 @@ namespace SerialPlotAndLog
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-		static void Main(string[] args)
-		{
+        static void Main(string[] args)
+        {
             // https://www.csharp411.com/console-output-from-winforms-application/
             AttachConsole(ATTACH_PARENT_PROCESS);
 
@@ -54,9 +54,9 @@ namespace SerialPlotAndLog
                 }
             }
 
-			Application.EnableVisualStyles();
-			Application.SetCompatibleTextRenderingDefault(false);
-			Application.Run(new frmMain(new SerialPortInfo { PortName = port, BaudRate = baud }));
-		}
-	}
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.Run(new frmMain(new SerialPortInfo { PortName = port, BaudRate = baud }));
+        }
+    }
 }
