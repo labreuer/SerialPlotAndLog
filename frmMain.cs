@@ -15,17 +15,22 @@ using System.Windows.Forms.DataVisualization.Charting;
 
 namespace SerialPlotAndLog
 {
+    public struct SerialPortInfo
+    {
+        public string PortName { get; set; }
+        public string BaudRate { get; set; }
+    }
+
 	public partial class frmMain : Form
 	{
-        private string _serialPortName;
-        private string _baudRate;
+        private SerialPortInfo _args;
+        private SaveFileDialog _current;
         private static bool _abortReading = false;
         private static IAsyncResult _asyncResult = null;
 
-		public frmMain(string serialPortName, string baud)
+		public frmMain(SerialPortInfo args)
 		{
-            _serialPortName = serialPortName;
-            _baudRate = baud;
+            _args = args;
 
             InitializeComponent();
 			this.Load += frmMain_Load;
@@ -63,8 +68,8 @@ namespace SerialPlotAndLog
         private void frmMain_Load(object sender, EventArgs e)
         {
             error.Text = "";
-            var portName = LoadPorts(_serialPortName);
-            var baudRate = LoadBaudRates(_baudRate);
+            var portName = LoadPorts(_args.PortName);
+            var baudRate = LoadBaudRates(_args.BaudRate);
 
             SetupChart(portName, baudRate);
 

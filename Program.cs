@@ -56,7 +56,7 @@ namespace SerialPlotAndLog
 
 			Application.EnableVisualStyles();
 			Application.SetCompatibleTextRenderingDefault(false);
-			Application.Run(new frmMain(port, baud));
+			Application.Run(new frmMain(new SerialPortInfo { PortName = port, BaudRate = baud }));
 		}
 	}
 }
