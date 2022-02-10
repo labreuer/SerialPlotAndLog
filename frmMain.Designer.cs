@@ -28,7 +28,7 @@
 		/// </summary>
 		private void InitializeComponent()
 		{
-            System.Windows.Forms.DataVisualization.Charting.Legend legend1 = new System.Windows.Forms.DataVisualization.Charting.Legend();
+            System.Windows.Forms.DataVisualization.Charting.Legend legend2 = new System.Windows.Forms.DataVisualization.Charting.Legend();
             this.chart = new System.Windows.Forms.DataVisualization.Charting.Chart();
             this.panel1 = new System.Windows.Forms.Panel();
             this.alsoResetChart = new System.Windows.Forms.CheckBox();
@@ -50,8 +50,8 @@
             this.chart.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            legend1.Name = "Legend1";
-            this.chart.Legends.Add(legend1);
+            legend2.Name = "Legend1";
+            this.chart.Legends.Add(legend2);
             this.chart.Location = new System.Drawing.Point(0, 0);
             this.chart.Name = "chart";
             this.chart.Size = new System.Drawing.Size(1558, 746);
@@ -143,7 +143,7 @@
             this.label2.AutoSize = true;
             this.label2.Font = new System.Drawing.Font("Microsoft Sans Serif", 10F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.label2.ForeColor = System.Drawing.SystemColors.ControlText;
-            this.label2.Location = new System.Drawing.Point(183, 44);
+            this.label2.Location = new System.Drawing.Point(337, 44);
             this.label2.Name = "label2";
             this.label2.Size = new System.Drawing.Size(69, 25);
             this.label2.TabIndex = 8;
@@ -167,7 +167,7 @@
             this.error.AutoSize = true;
             this.error.Font = new System.Drawing.Font("Microsoft Sans Serif", 10F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.error.ForeColor = System.Drawing.Color.Red;
-            this.error.Location = new System.Drawing.Point(374, 44);
+            this.error.Location = new System.Drawing.Point(528, 44);
             this.error.Name = "error";
             this.error.Size = new System.Drawing.Size(57, 25);
             this.error.TabIndex = 6;
@@ -179,7 +179,7 @@
             this.baud.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.baud.Font = new System.Drawing.Font("Microsoft Sans Serif", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.baud.FormattingEnabled = true;
-            this.baud.Location = new System.Drawing.Point(258, 41);
+            this.baud.Location = new System.Drawing.Point(412, 41);
             this.baud.Name = "baud";
             this.baud.Size = new System.Drawing.Size(110, 33);
             this.baud.TabIndex = 5;
@@ -192,7 +192,7 @@
             this.port.FormattingEnabled = true;
             this.port.Location = new System.Drawing.Point(67, 41);
             this.port.Name = "port";
-            this.port.Size = new System.Drawing.Size(110, 33);
+            this.port.Size = new System.Drawing.Size(264, 33);
             this.port.TabIndex = 4;
             // 
             // frmMain

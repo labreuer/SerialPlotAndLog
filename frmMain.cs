@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Win32;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -15,35 +16,76 @@ using System.Windows.Forms.DataVisualization.Charting;
 
 namespace SerialPlotAndLog
 {
-    public struct SerialPortInfo
+    public struct SerialPortConfig
     {
         public string PortName { get; set; }
-        public string BaudRate { get; set; }
+        public int BaudRate { get; set; }
+        public SerialPortConfig(string portName, int baudRate)
+        {
+            this.PortName = portName;
+            this.BaudRate = baudRate;
+        }
     }
 
     public partial class frmMain : Form
     {
-        private SerialPortInfo _args;
-        private SaveFileDialog _current;
+        private SerialPortConfig _args;
+        private SerialPortConfig _current;
         private static bool _abortReading = false;
         private static IAsyncResult _asyncResult = null;
+        private SerialPort _ser = null;
+        private FileStream _fs = null;
+        private SerialPortInfo SelectedPort
+        {
+            get => (SerialPortInfo)port.SelectedItem;
+            set => port.SelectedItem = value;
+        }
+        private int SelectedBaud
+        {
+            get => (int)baud.SelectedItem;
+            set => baud.SelectedItem = value;
+        }
 
-        public frmMain(SerialPortInfo args)
+        public frmMain(SerialPortConfig args)
         {
             _args = args;
 
             InitializeComponent();
             this.Load += frmMain_Load;
-            this.FormClosing += frmMain_FormClosing;
+            this.FormClosing += (s, e) => CloseHandles();
         }
 
-        private void frmMain_FormClosing(object sender, FormClosingEventArgs e)
+        private void frmMain_Load(object sender, EventArgs e)
         {
-            CloseHandles();
-        }
+            error.Text = "";
+            RepopulatePortSelect();
+            PopulateBaudRates(_args.BaudRate);
+            _current = InitializeFromConfig(_args);
 
-        private SerialPort _ser;
-        private FileStream _fs = null;
+            SetupChart(_current);
+
+            void eh(object s2, EventArgs e2) => SetupChart(new SerialPortConfig(SelectedPort.PortName, SelectedBaud));
+            bool ignoreChanges = false;
+            port.DropDown += (s2, e2) =>
+            {
+                ignoreChanges = true;
+                RepopulatePortSelect();
+                ignoreChanges = false;
+            };
+            port.SelectedIndexChanged += (s2, e2) => { if (!ignoreChanges) eh(s2, e2); };
+            baud.SelectedIndexChanged += eh;
+            resetChart.Click += eh;
+            resetArduino.Click += (s2, e2) =>
+            {
+                _ser.DtrEnable = true;
+                Thread.Sleep(10);
+                _ser.DtrEnable = false;
+                if (alsoResetChart.Checked)
+                    eh(null, new EventArgs());
+            };
+            new ToolTip().SetToolTip(error, "Double click to copy error text to the clipboard.");
+            error.DoubleClick += (s2, e2) => Clipboard.SetText(error.Text);
+        }
 
         private void CloseHandles()
         {
@@ -65,37 +107,15 @@ namespace SerialPlotAndLog
             }
         }
 
-        private void frmMain_Load(object sender, EventArgs e)
+        private void SetupChart(SerialPortConfig config)
         {
-            error.Text = "";
-            var portName = LoadPorts(_args.PortName);
-            var baudRate = LoadBaudRates(_args.BaudRate);
-
-            SetupChart(portName, baudRate);
-
-            var eh = (EventHandler)((s2, e2) => SetupChart((string)port.SelectedItem, (int)baud.SelectedItem));
-
-            this.port.SelectedIndexChanged += eh;
-            this.baud.SelectedIndexChanged += eh;
-            this.resetChart.Click += eh;
-            this.resetArduino.Click += (s2, e2) =>
-            {
-                _ser.DtrEnable = false;
-                System.Threading.Thread.Sleep(10);
-                _ser.DtrEnable = true;
-                if (this.alsoResetChart.Checked)
-                    eh(null, new EventArgs());
-            };
-        }
-
-        private void SetupChart(string portName, int baudRate)
-        {
-            if (portName == null || baudRate == -1)
-                return;
             CloseHandles();
+
+            if (string.IsNullOrEmpty(config.PortName) || config.BaudRate <= 0)
+                return;
+
             error.Text = null;
             lastData.Text = null;
-
 
             chart.ChartAreas.Clear();
             //chart.Legends.Clear();
@@ -113,7 +133,7 @@ namespace SerialPlotAndLog
 
             try
             {
-                _ser = new SerialPort(portName, baudRate);
+                _ser = new SerialPort(config.PortName, config.BaudRate);
                 _ser.Open();
             }
             catch (Exception ex)
@@ -133,7 +153,6 @@ namespace SerialPlotAndLog
                 {
                     _fs.Write(by, 0, by.Length);
                     _fs.Flush();
-                    //Console.WriteLine(Encoding.ASCII.GetString(by));
                     string s = residual + Encoding.ASCII.GetString(by);
                     string[] lines = Regex.Split(s, @"\n\r?");
                     residual = lines[lines.Length - 1];
@@ -207,6 +226,14 @@ namespace SerialPlotAndLog
                     }
                     catch (IOException ex)
                     {
+                        if (ex.Message == "The I/O operation has been aborted because of either a thread exit or an application request.\r\n")
+                        {
+                            error(new Exception("Please check if the COM port is still available."));
+                            port.Close();
+                            port.Dispose();
+                            return;
+                        }
+
                         error(ex);
                     }
                     catch (InvalidOperationException ex)
@@ -224,57 +251,73 @@ namespace SerialPlotAndLog
             kickoffRead();
         }
 
-        private string LoadPorts(string selectedPort)
+        private SerialPortConfig InitializeFromConfig(SerialPortConfig args)
         {
-            string ret = null;
-            var ports = SerialPort.GetPortNames();
-            foreach (string p in ports)
-                this.port.Items.Add(p);
+            string error = null;
 
-            if (selectedPort != null)
+            if (args.PortName != null)
             {
-                if (SetPortValue(ports, selectedPort, " specified from the command line"))
-                    ret = (string)port.SelectedItem;
+                var spi = port.Items.Cast<SerialPortInfo>()
+                    .SingleOrDefault(e => e.PortName.Equals(args.PortName, StringComparison.OrdinalIgnoreCase));
+
+                if (spi != null)
+                    SelectedPort = spi;
+                else
+                    error = $"No port found with name {args.PortName}.";
             }
-            else if (ports.Length > 0)
+            else if (port.Items.Count > 1)
             {
-                this.port.SelectedIndex = 0;
-                ret = (string)port.SelectedItem;
+                port.SelectedIndex = 1;
+                args.PortName = SelectedPort.PortName;
+            }
+
+            if (args.BaudRate != 0)
+            {
+                if (baud.Items.Contains(args.BaudRate))
+                    SelectedBaud = args.BaudRate;
+                else
+                    error = $"${args.BaudRate} is not an acceptable baud rate.";
             }
             else
             {
-                error.Text = "No COM ports found.";
+                args.BaudRate = SelectedBaud;
             }
 
-            return ret;
-        }
-
-        private void Port_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            throw new NotImplementedException();
-        }
-
-        private bool SetPortValue(string[] ports, string portName, string extraError = "")
-        {
-            if (portName == null)
+            if (error != null)
             {
-                error.Text = "Port name cannot be null.";
-                return false;
+                this.error.Text = error;
+                return new SerialPortConfig("", int.Parse(baud.Text));
             }
-
-            var idx = Array.FindIndex(ports, p => p.Equals(portName, StringComparison.OrdinalIgnoreCase));
-
-            if (idx == -1)
+            else
             {
-                error.Text = string.Format("Did not find COM port '{0}'{1}.", portName, extraError);
-                return false;
+                return args;
             }
-
-            this.port.SelectedIndex = idx;
-            return true;
         }
 
-        private int LoadBaudRates(string selectedBaud)
+        private SerialPortInfo[] RepopulatePortSelect()
+        {
+            var dummy = new SerialPortInfo
+            {
+                PortName = "",
+                Description = "disconnect"
+            };
+
+            var ports = new[] { dummy }.Concat(SerialPortInfo.GetSerialPorts()).ToArray();
+            var h = new HashSet<SerialPortInfo>(ports);
+            var lastSelected = port.SelectedIndex;
+
+            // lastSelected == -1 in its default state
+            if (port.Items.Count > 0 && !h.Contains(SelectedPort) || lastSelected == -1)
+                lastSelected = 0;
+
+            port.Items.Clear();
+            port.Items.AddRange(ports);
+            port.SelectedIndex = lastSelected;
+
+            return ports;
+        }
+
+        private void PopulateBaudRates(int additionalBaudRate = 0)
         {
             const int DefaultBaud = 115200;
             int[] bauds = new[]
@@ -286,32 +329,13 @@ namespace SerialPlotAndLog
                 19200,
                 9600,
             };
-            foreach (var b in bauds)
-                this.baud.Items.Add(b);
-
-            return SetBaudRate(bauds, selectedBaud ?? DefaultBaud.ToString(), " specified from the command line");
-        }
-
-        private int SetBaudRate(int[] bauds, string baudRate, string extraError = "")
-        {
-            if (baudRate == null)
-                throw new ArgumentNullException(nameof(baudRate));
-
-            int baud;
-            if (!int.TryParse(baudRate, out baud))
-            {
-                error.Text = string.Format("'{0}'{1} is not an integer.", baudRate, extraError);
-                return -1;
-            }
-
-            var idx = Array.IndexOf(bauds, baud);
-
-            if (idx != -1)
-                this.baud.SelectedIndex = idx;
-            else
-                this.baud.SelectedItem = baud;
-
-            return baud;
+            if (additionalBaudRate == 0)
+                additionalBaudRate = DefaultBaud;
+            var allBauds = bauds.Concat(new[] { additionalBaudRate })
+                .Distinct()
+                .OrderByDescending(x => x);
+            baud.Items.AddRange(allBauds.Select(b => (object)b).ToArray());
+            baud.SelectedItem = additionalBaudRate;
         }
     }
 }

@@ -14,9 +14,6 @@ namespace SerialPlotAndLog
         static extern bool AttachConsole(int dwProcessId);
         private const int ATTACH_PARENT_PROCESS = -1;
 
-        /// <summary>
-        /// The main entry point for the application.
-        /// </summary>
         [STAThread]
         static void Main(string[] args)
         {
@@ -24,39 +21,38 @@ namespace SerialPlotAndLog
             AttachConsole(ATTACH_PARENT_PROCESS);
 
             string port = args.Length > 0 ? args[0] : null;
-            string baud = args.Length > 1 ? args[1] : null;
+            string sBaud = args.Length > 1 ? args[1] : null;
+            int baud = 0;
 
-            if (false)//(port == null)
+            // works fine with cmd.exe
+            // a bit wonky with PowerShell.exe (displays but cursor location does not update)
+            // doesn't work at all with PowerShell_ISE.exe
+            // -- but this is really just for convenience, so let's not work any harder
+            if (port != null)
             {
-                var ports = SerialPort.GetPortNames();
-
-                if (ports.Length == 1)
+                var ports = SerialPortInfo.GetSerialPorts().ToArray();
+                if (!ports.Any(p => p.PortName.Equals(port, StringComparison.Ordinal)))
                 {
-                    port = ports[0];
-                    Console.WriteLine("Automatically using the only port detected: {0}", port);
+                    if (ports.Length == 0)
+                    {
+                        Console.Error.WriteLine("No COM ports found.");
+                    }
+                    else
+                    {
+                        Console.Error.WriteLine($"No COM port found matching {port}; available ports:");
+                        foreach (var p in ports)
+                            Console.Error.WriteLine($"   {p}");
+                    }
                 }
-                else if (ports.Length == 0)
-                {
-                    Console.Error.WriteLine("No serial ports found.");
-                    return;
-                }
-                else
-                {
-                    string name = System.IO.Path.GetFileName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-                    Console.Error.WriteLine("Multiple ports found:");
-                    foreach (var p in ports)
-                        Console.Error.WriteLine("    {0}", p);
-                    Console.Error.WriteLine("Please specify one by typing:");
-                    Console.Error.WriteLine("    {0} COMX", name);
-                    Console.Error.WriteLine("or:");
-                    Console.Error.WriteLine("    {0} COMX BAUD", name);
-                    return;
-                }
+            }
+            if (sBaud != null && !int.TryParse(args[1], out baud))
+            {
+                Console.Error.WriteLine("Expected an integer as the second argument (for baud rate).");
             }
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new frmMain(new SerialPortInfo { PortName = port, BaudRate = baud }));
+            Application.Run(new frmMain(new SerialPortConfig(port, baud)));
         }
     }
 }
