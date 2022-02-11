@@ -149,6 +149,7 @@ namespace SerialPlotAndLog
                 string filename = string.Format("{0:yyyy-MM-dd_HH-mm-ss}_SerialPlotAndLog.txt", DateTime.Now);
                 this.Text = string.Format("SerialPlotAndLog - {0}", Path.Combine(Environment.CurrentDirectory, filename));
                 _fs = new FileStream(filename, FileMode.Create);
+                // consider https://www.sparxeng.com/blog/software/reading-lines-serial-port
                 SetupDataReceive(_ser, by =>
                 {
                     _fs.Write(by, 0, by.Length);
@@ -296,11 +297,7 @@ namespace SerialPlotAndLog
 
         private SerialPortInfo[] RepopulatePortSelect()
         {
-            var dummy = new SerialPortInfo
-            {
-                PortName = "",
-                Description = "disconnect"
-            };
+            var dummy = new SerialPortInfo("", "disconnect");
 
             var ports = new[] { dummy }.Concat(SerialPortInfo.GetSerialPorts()).ToArray();
             var h = new HashSet<SerialPortInfo>(ports);

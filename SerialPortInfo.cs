@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.IO.Ports;
+using System.Linq;
 using System.Management;
 
 namespace SerialPlotAndLog
@@ -7,6 +9,12 @@ namespace SerialPlotAndLog
     {
         public string PortName { get; set; }
         public string Description { get; set; }
+
+        public SerialPortInfo(string portName, string description)
+        {
+            PortName = portName;
+            Description = description;
+        }
 
         public override int GetHashCode()
         {
@@ -30,24 +38,33 @@ namespace SerialPlotAndLog
 
         public override string ToString()
         {
-            return !string.IsNullOrEmpty(PortName)
-                ? $"{PortName} ({Description})"
-                : $"({Description})";
+            var name = !string.IsNullOrEmpty(PortName) ? $"{PortName} " : "";
+            var description = !string.IsNullOrEmpty(Description) ? $"({Description})" : "";
+
+            return $"{name}{description}";
         }
 
         public static IEnumerable<SerialPortInfo> GetSerialPorts()
         {
+            var ports = new List<SerialPortInfo>();
+
             using (var mc = new ManagementClass("Win32_SerialPort"))
             {
                 foreach (ManagementObject mo in mc.GetInstances())
                 {
-                    yield return new SerialPortInfo
-                    {
-                        PortName = (string)mo.GetPropertyValue("DeviceID"),
-                        Description = (string)mo.GetPropertyValue("Description"),
-                    };
+                    ports.Add(new SerialPortInfo(
+                        (string)mo.GetPropertyValue("DeviceID"),
+                        (string)mo.GetPropertyValue("Description")));
                 }
             }
+
+            // HACK: the above wasn't working on a different machine
+            foreach (var name in SerialPort.GetPortNames())
+                if (!ports.Any(p => name.Equals(p.PortName, System.StringComparison.OrdinalIgnoreCase)))
+                    ports.Add(new SerialPortInfo(name, null));
+
+            return ports;
+
             // SerialPort.GetPortNames() doesn't update while the application is open if
             // a device is unplugged; the same is true of the following registry keys:
             //     using (var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DEVICEMAP\SERIALCOMM"))
