@@ -18,7 +18,7 @@ namespace SerialPlotAndLog
 
         public override int GetHashCode()
         {
-            return PortName.GetHashCode() ^ Description.GetHashCode();
+            return (PortName ?? "").GetHashCode() ^ (Description ?? "").GetHashCode();
         }
 
         public override bool Equals(object obj)
