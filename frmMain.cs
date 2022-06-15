@@ -1,5 +1,6 @@
 ﻿using Microsoft.Win32;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
@@ -35,6 +36,8 @@ namespace SerialPlotAndLog
         private static IAsyncResult _asyncResult = null;
         private SerialPort _ser = null;
         private FileStream _fs = null;
+        private ConcurrentQueue<string> _queue = new ConcurrentQueue<string>();
+        private System.Windows.Forms.Timer _timer = new System.Windows.Forms.Timer();
         private SerialPortInfo SelectedPort
         {
             get => (SerialPortInfo)port.SelectedItem;
@@ -85,6 +88,9 @@ namespace SerialPlotAndLog
             };
             new ToolTip().SetToolTip(error, "Double click to copy error text to the clipboard.");
             error.DoubleClick += (s2, e2) => Clipboard.SetText(error.Text);
+            _timer.Tick += _timer_Tick;
+            _timer.Interval = 50;
+            _timer.Enabled = true;
         }
 
         private void CloseHandles()
@@ -107,9 +113,62 @@ namespace SerialPlotAndLog
             }
         }
 
+        DefaultDictionary<int, Series> _series;
+        ChartArea _area;
+        bool _minimumYValueSet = false;
+        private void _timer_Tick(object sender, EventArgs e)
+        {
+            if (_queue.IsEmpty)
+                return;
+            _timer.Enabled = false;
+
+            chart.Invoke((Action)(() =>
+            {
+                while (_queue.TryDequeue(out string line))
+                {
+                    lastData.Text = line;
+                    if (line.StartsWith("#"))
+                        continue;
+                    var x = Regex.Split(line, " *, *");
+                    for (int j = 0; j < x.Length; j++)
+                    {
+                        if (float.TryParse(x[j], out float f))
+                        {
+                            _series[j].Points.Add(f);
+                            if (yAxisNonZero.Checked)
+                            {
+                                if (!_minimumYValueSet)
+                                {
+                                    _area.AxisY.Minimum = Math.Floor(f);
+                                    _minimumYValueSet = true;
+                                }
+                                else
+                                {
+                                    _area.AxisY.Minimum = Math.Min(_area.AxisY.Minimum, Math.Floor(f));
+                                }
+                            }
+                        }
+                        else
+                        {
+                            _series[j].Points.Add(new DataPoint { IsEmpty = true });
+                            if (x[j].Length != 0)
+                                _series[j].LegendText = x[j];
+                        }
+                    }
+                    _area.AxisX.Maximum++;
+                }
+                chart.Invalidate();
+            }));
+
+            _timer.Enabled = true;
+        }
+
         private void SetupChart(SerialPortConfig config)
         {
             CloseHandles();
+            // the only way to clear in .NET 4.8
+            while (_queue.TryDequeue(out string ignored))
+                ;
 
             if (string.IsNullOrEmpty(config.PortName) || config.BaudRate <= 0)
                 return;
@@ -121,10 +180,10 @@ namespace SerialPlotAndLog
             //chart.Legends.Clear();
             chart.Series.Clear();
 
-            var area = new ChartArea();
-            bool minimumYValueSet = false;
-            chart.ChartAreas.Add(area);
-            var series = new DefaultDictionary<int, Series>(n =>
+            _area = new ChartArea();
+            _minimumYValueSet = false;
+            chart.ChartAreas.Add(_area);
+            _series = new DefaultDictionary<int, Series>(n =>
                 {
                     var newS = new Series() { ChartType = SeriesChartType.Line };
                     chart.Series.Add(newS);
@@ -152,48 +211,14 @@ namespace SerialPlotAndLog
                 // consider https://www.sparxeng.com/blog/software/reading-lines-serial-port
                 SetupDataReceive(_ser, by =>
                 {
+                    // FIXME: on exception, _fs can be closed, here
                     _fs.Write(by, 0, by.Length);
                     _fs.Flush();
                     string s = residual + Encoding.ASCII.GetString(by);
                     string[] lines = Regex.Split(s, @"\n\r?");
                     residual = lines[lines.Length - 1];
-                    chart.Invoke((Action)(() =>
-                    {
-                        for (int i = 0; i <= lines.Length - 2; i++)
-                        {
-                            lastData.Text = lines[i];
-                            if (lines[i].StartsWith("#"))
-                                continue;
-                            var x = Regex.Split(lines[i], " *, *");
-                            for (int j = 0; j < x.Length; j++)
-                            {
-                                if (float.TryParse(x[j], out float f))
-                                {
-                                    series[j].Points.Add(f);
-                                    if (yAxisNonZero.Checked)
-                                    {
-                                        if (!minimumYValueSet)
-                                        {
-                                            area.AxisY.Minimum = Math.Floor(f);
-                                            minimumYValueSet = true;
-                                        }
-                                        else
-                                        {
-                                            area.AxisY.Minimum = Math.Min(area.AxisY.Minimum, Math.Floor(f));
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    series[j].Points.Add(new DataPoint { IsEmpty = true });
-                                    if (x[j].Length != 0)
-                                        series[j].LegendText = x[j];
-                                }
-                            }
-                            area.AxisX.Maximum++;
-                        }
-                        chart.Invalidate();
-                    }));
+                    for (int i = 0; i <= lines.Length - 2; i++)
+                        _queue.Enqueue(lines[i]);
                 }, ex => error.Invoke((Action)(() => error.Text = ex.Message)));
             }
             catch
@@ -203,6 +228,23 @@ namespace SerialPlotAndLog
                 _fs = null;
                 throw;
             }
+        }
+
+        System.Threading.Timer _testTimer;
+        StreamReader _testSr;
+        private void SetupDataReceiveTEST(SerialPort _, Action<byte[]> receive, Action<Exception> error)
+        {
+
+            const string TestFileFullName = @"C:\Users\labreuer\Downloads\20220603_4650.txt";
+            if (_testSr == null)
+                _testSr = new StreamReader(TestFileFullName);
+            if (_testTimer != null)
+                _testTimer.Dispose();
+            _testTimer = new System.Threading.Timer(o =>
+            {
+                var by = Encoding.ASCII.GetBytes(_testSr.ReadLine() + "\r\n");
+                receive(by);
+            }, null, 0, 20);
         }
 
         private static void SetupDataReceive(SerialPort port, Action<byte[]> receive, Action<Exception> error)

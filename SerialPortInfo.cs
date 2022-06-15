@@ -48,15 +48,16 @@ namespace SerialPlotAndLog
         {
             var ports = new List<SerialPortInfo>();
 
-            using (var mc = new ManagementClass("Win32_SerialPort"))
-            {
-                foreach (ManagementObject mo in mc.GetInstances())
-                {
-                    ports.Add(new SerialPortInfo(
-                        (string)mo.GetPropertyValue("DeviceID"),
-                        (string)mo.GetPropertyValue("Description")));
-                }
-            }
+            // HACK: need to make this a configuration option
+            //using (var mc = new ManagementClass("Win32_SerialPort"))
+            //{
+            //    foreach (ManagementObject mo in mc.GetInstances())
+            //    {
+            //        ports.Add(new SerialPortInfo(
+            //            (string)mo.GetPropertyValue("DeviceID"),
+            //            (string)mo.GetPropertyValue("Description")));
+            //    }
+            //}
 
             // HACK: the above wasn't working on a different machine
             foreach (var name in SerialPort.GetPortNames())
