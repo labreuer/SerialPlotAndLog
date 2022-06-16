@@ -113,9 +113,60 @@ namespace SerialPlotAndLog
             }
         }
 
-        DefaultDictionary<int, Series> _series;
+        class AugmentedSeries : Series
+        {
+            public Label CtlLabel;
+            public TextBox CtlTextBox;
+            public CheckBox CtlCheckBox;
+
+            public AugmentedSeries(Form form, int seriesNumber)
+            {
+                // there wasn't an easy way to get the legend dimensions
+                CtlLabel = new Label { Text = $"series ${seriesNumber}", TextAlign = ContentAlignment.MiddleRight, Left = form.Width - 240, Top = 300 + seriesNumber * 30 + 6, BackColor = Color.White };
+                CtlTextBox = new TextBox { Left = form.Width - 140, Top = 300 + seriesNumber * 30, Width = 80 };
+                CtlCheckBox = new CheckBox { Text = "", Left = form.Width - 50, Top = 300 + seriesNumber * 30 + 6 };
+
+                CtlTextBox.Font = new Font(CtlTextBox.Font.FontFamily, 12);
+
+                form.Controls.Add(CtlLabel);
+                form.Controls.Add(CtlTextBox);
+                form.Controls.Add(CtlCheckBox);
+
+                CtlLabel.BringToFront();
+                CtlTextBox.BringToFront();
+                CtlCheckBox.BringToFront();
+
+                CtlCheckBox.CheckedChanged += CtlCheckBox_CheckedChanged;
+            }
+
+            private void CtlCheckBox_CheckedChanged(object sender, EventArgs e)
+            {
+                this.YAxisType = CtlCheckBox.Checked ? AxisType.Secondary : AxisType.Primary;
+            }
+
+            public void ChangeLabel(string text)
+            {
+                this.LegendText = text;
+                CtlLabel.Text = text;
+            }
+
+            // HACK: our data rate is 8 per second right now
+            public void AddPoint(int index, string s, double f)
+            {
+                this.Points.Add(new DataPoint { XValue = index / 8.0, YValues = new[] { f } });
+                CtlTextBox.Text = s;
+            }
+            public void AddEmptyPoint(int index)
+            {
+                this.Points.Add(new DataPoint { XValue = index / 8.0, IsEmpty = true });
+                CtlTextBox.Text = "";
+            }
+        }
+
+        DefaultDictionary<int, AugmentedSeries> _series;
         ChartArea _area;
         bool _minimumYValueSet = false;
+        int _dataIndex = 0;
         private void _timer_Tick(object sender, EventArgs e)
         {
             if (_queue.IsEmpty)
@@ -129,12 +180,13 @@ namespace SerialPlotAndLog
                     lastData.Text = line;
                     if (line.StartsWith("#"))
                         continue;
+                    _dataIndex++;
                     var x = Regex.Split(line, " *, *");
                     for (int j = 0; j < x.Length; j++)
                     {
                         if (float.TryParse(x[j], out float f))
                         {
-                            _series[j].Points.Add(f);
+                            _series[j].AddPoint(_dataIndex, x[j], f);
                             if (yAxisNonZero.Checked)
                             {
                                 if (!_minimumYValueSet)
@@ -150,12 +202,12 @@ namespace SerialPlotAndLog
                         }
                         else
                         {
-                            _series[j].Points.Add(new DataPoint { IsEmpty = true });
+                            _series[j].AddEmptyPoint(_dataIndex);
                             if (x[j].Length != 0)
-                                _series[j].LegendText = x[j];
+                                _series[j].ChangeLabel(x[j]);
                         }
                     }
-                    _area.AxisX.Maximum++;
+                    //_area.AxisX.Maximum++;
                 }
                 chart.Invalidate();
             }));
@@ -177,15 +229,14 @@ namespace SerialPlotAndLog
             lastData.Text = null;
 
             chart.ChartAreas.Clear();
-            //chart.Legends.Clear();
             chart.Series.Clear();
 
             _area = new ChartArea();
             _minimumYValueSet = false;
             chart.ChartAreas.Add(_area);
-            _series = new DefaultDictionary<int, Series>(n =>
+            _series = new DefaultDictionary<int, AugmentedSeries>(n =>
                 {
-                    var newS = new Series() { ChartType = SeriesChartType.Line };
+                    var newS = new AugmentedSeries(this, n) { ChartType = SeriesChartType.Line, BorderWidth = 2 };
                     chart.Series.Add(newS);
                     return newS;
                 });
