@@ -122,9 +122,9 @@ namespace SerialPlotAndLog
             public AugmentedSeries(Form form, int seriesNumber)
             {
                 // there wasn't an easy way to get the legend dimensions
-                CtlLabel = new Label { Text = $"series ${seriesNumber}", TextAlign = ContentAlignment.MiddleRight, Left = form.Width - 240, Top = 300 + seriesNumber * 30 + 6, BackColor = Color.White };
-                CtlTextBox = new TextBox { Left = form.Width - 140, Top = 300 + seriesNumber * 30, Width = 80 };
-                CtlCheckBox = new CheckBox { Text = "", Left = form.Width - 50, Top = 300 + seriesNumber * 30 + 6 };
+                CtlLabel = new Label { Text = $"series {seriesNumber}", TextAlign = ContentAlignment.MiddleRight, Left = form.Width - 240, Top = 300 + seriesNumber * 30 + 6, BackColor = Color.White, Anchor = AnchorStyles.Right };
+                CtlTextBox = new TextBox { Left = form.Width - 140, Top = 300 + seriesNumber * 30, Width = 70, Anchor = AnchorStyles.Right };
+                CtlCheckBox = new CheckBox { Text = "", Left = form.Width - 50, Top = 300 + seriesNumber * 30 + 6, Anchor = AnchorStyles.Right };
 
                 CtlTextBox.Font = new Font(CtlTextBox.Font.FontFamily, 12);
 
@@ -160,6 +160,20 @@ namespace SerialPlotAndLog
             {
                 this.Points.Add(new DataPoint { XValue = index / 8.0, IsEmpty = true });
                 CtlTextBox.Text = "";
+            }
+
+            public void RemoveControls()
+            {
+                foreach (var ctl in new Control[] { CtlLabel, CtlTextBox, CtlCheckBox })
+                {
+                    if (ctl.Parent != null)
+                        ctl.Parent.Controls.Remove(ctl);
+                    ctl.Dispose();
+                }
+
+                CtlLabel = null;
+                CtlTextBox = null;
+                CtlCheckBox = null;
             }
         }
 
@@ -225,6 +239,11 @@ namespace SerialPlotAndLog
             if (string.IsNullOrEmpty(config.PortName) || config.BaudRate <= 0)
                 return;
 
+            if (_series != null)
+                foreach (var ser in _series.Values)
+                    ser.RemoveControls();
+
+            _dataIndex = 0;
             error.Text = null;
             lastData.Text = null;
 
@@ -262,7 +281,12 @@ namespace SerialPlotAndLog
                 // consider https://www.sparxeng.com/blog/software/reading-lines-serial-port
                 SetupDataReceive(_ser, by =>
                 {
-                    // FIXME: on exception, _fs can be closed, here
+                    // this should only fire when the chart is reset, and that will get altered in a soon-to-be-made change
+                    if (!_fs.CanWrite)
+                    {
+                        error.Text = "Cannot write to log file.";
+                        return;
+                    }
                     _fs.Write(by, 0, by.Length);
                     _fs.Flush();
                     string s = residual + Encoding.ASCII.GetString(by);
