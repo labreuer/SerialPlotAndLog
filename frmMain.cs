@@ -77,7 +77,7 @@ namespace SerialPlotAndLog
             };
             port.SelectedIndexChanged += (s2, e2) => { if (!ignoreChanges) eh(s2, e2); };
             baud.SelectedIndexChanged += eh;
-            resetChart.Click += eh;
+            resetChart.Click += (object s2, EventArgs e2) => ResetChartOnly();
             resetArduino.Click += (s2, e2) =>
             {
                 _ser.DtrEnable = true;
@@ -112,6 +112,11 @@ namespace SerialPlotAndLog
                 _fs.Dispose();
             }
         }
+
+        // HACK: our data rate is 8 per second right now
+        const float SamplesPerSecond = 8;
+        // HACK: this should be configured in a file or via the UI
+        const int MaxSamples = 2400;
 
         class AugmentedSeries : Series
         {
@@ -150,15 +155,14 @@ namespace SerialPlotAndLog
                 CtlLabel.Text = text;
             }
 
-            // HACK: our data rate is 8 per second right now
             public void AddPoint(int index, string s, double f)
             {
-                this.Points.Add(new DataPoint { XValue = index / 8.0, YValues = new[] { f } });
+                this.Points.Add(new DataPoint { XValue = index / SamplesPerSecond, YValues = new[] { f } });
                 CtlTextBox.Text = s;
             }
             public void AddEmptyPoint(int index)
             {
-                this.Points.Add(new DataPoint { XValue = index / 8.0, IsEmpty = true });
+                this.Points.Add(new DataPoint { XValue = index / SamplesPerSecond, IsEmpty = true });
                 CtlTextBox.Text = "";
             }
 
@@ -181,9 +185,12 @@ namespace SerialPlotAndLog
         ChartArea _area;
         bool _minimumYValueSet = false;
         int _dataIndex = 0;
+        int _visibleStartIndex = 0;
         private void _timer_Tick(object sender, EventArgs e)
         {
             if (_queue.IsEmpty)
+                return;
+            if (!Monitor.TryEnter(_timer, 1000))
                 return;
             _timer.Enabled = false;
 
@@ -223,10 +230,38 @@ namespace SerialPlotAndLog
                     }
                     //_area.AxisX.Maximum++;
                 }
+                if (chart.Series[0].Points.Count > MaxSamples)
+                {
+                    /* // The below is the non-zoom option
+                    int toRemove = chart.Series[0].Points.Count - MaxSamples;
+                    //toRemove = (int)(Math.Ceiling(toRemove / SamplesPerSecond) * SamplesPerSecond);
+
+                    _visibleStartIndex += toRemove;
+                    foreach (var ser in chart.Series)
+                        for (int i = 0; i < toRemove; i++)
+                            ser.Points.RemoveAt(0);
+                    //chart.ChartAreas[0].AxisX.Minimum = Math.Floor(_visibleStartIndex / SamplesPerSecond);
+                    //chart.ChartAreas[0].AxisX.Maximum = Math.Floor(_visibleStartIndex / SamplesPerSecond) + MaxSamples / SamplesPerSecond;
+                    chart.ChartAreas[0].AxisX.Minimum = _visibleStartIndex / SamplesPerSecond;
+                    chart.ChartAreas[0].AxisX.Maximum = _visibleStartIndex / SamplesPerSecond + + MaxSamples / SamplesPerSecond;
+                    //chart.ChartAreas[0].AxisX.MajorTickMark.IntervalOffset = (_visibleStartIndex % SamplesPerSecond) / SamplesPerSecond;
+                    chart.ChartAreas[0].AxisX.IntervalOffset = -(_visibleStartIndex % SamplesPerSecond) / SamplesPerSecond;
+                    */
+
+                    var start = (_dataIndex - MaxSamples) / SamplesPerSecond;
+                    var sv = chart.ChartAreas[0].AxisX.ScaleView;
+
+                    if (!sv.IsZoomed)
+                        sv.Size = MaxSamples / SamplesPerSecond;
+
+                    if (start - sv.Position < 2)
+                        sv.Scroll(start);
+                }
                 chart.Invalidate();
             }));
 
             _timer.Enabled = true;
+            Monitor.Exit(_timer);
         }
 
         private void SetupChart(SerialPortConfig config)
@@ -271,6 +306,13 @@ namespace SerialPlotAndLog
                 return;
             }
 
+            var area = chart.ChartAreas[0];
+            area.CursorX.AutoScroll = true;
+            area.AxisX.ScaleView.Zoomable = true;
+            area.AxisX.ScaleView.SizeType = DateTimeIntervalType.Number;
+            area.AxisX.ScrollBar.ButtonStyle = ScrollBarButtonStyles.SmallScroll;
+            //area.AxisX.ScaleView.SmallScrollSize = MaxSamples / SamplesPerSecond;
+
             string residual = "";
 
             try
@@ -284,7 +326,7 @@ namespace SerialPlotAndLog
                     // this should only fire when the chart is reset, and that will get altered in a soon-to-be-made change
                     if (!_fs.CanWrite)
                     {
-                        error.Text = "Cannot write to log file.";
+                        error.Invoke((Action)(() => error.Text = "Cannot write to log file."));
                         return;
                     }
                     _fs.Write(by, 0, by.Length);
@@ -303,6 +345,39 @@ namespace SerialPlotAndLog
                 _fs = null;
                 throw;
             }
+        }
+
+        private void ResetChartOnly()
+        {
+            if (!Monitor.TryEnter(_timer, 3000))
+            {
+                error.Text = "Monitor.TryEnter returned false";
+                return;
+            }
+
+            foreach (var ser in chart.Series)
+                ser.Points.Clear();
+
+            // not going to do this for now, to match position in file
+            //_dataIndex = 0;
+            _minimumYValueSet = false;
+            error.Text = null;
+            lastData.Text = null;
+            _visibleStartIndex = _dataIndex;
+            var area = chart.ChartAreas.First();
+            area.AxisX.Minimum = Math.Floor(_visibleStartIndex / SamplesPerSecond);
+            // https://stackoverflow.com/a/10593832/2328341 -- ChartArea.RecalculateAxesScale() did not work
+            // not sure how many of the below are required for the zoom option, rather than the "delete points" option
+            area.AxisX.Maximum = Double.NaN;
+            area.AxisY.Minimum = Double.NaN;
+            area.AxisY.Maximum = Double.NaN;
+            area.AxisY2.Minimum = Double.NaN;
+            area.AxisY2.Maximum = Double.NaN;
+            var start = (_dataIndex - MaxSamples) / SamplesPerSecond;
+            var sv = chart.ChartAreas[0].AxisX.ScaleView;
+            sv.ZoomReset();
+
+            Monitor.Exit(_timer);
         }
 
         System.Threading.Timer _testTimer;
