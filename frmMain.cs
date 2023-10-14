@@ -65,9 +65,10 @@ namespace SerialPlotAndLog
             PopulateBaudRates(_args.BaudRate);
             _current = InitializeFromConfig(_args);
 
-            SetupChart(_current);
-
-            void eh(object s2, EventArgs e2) => SetupChart(new SerialPortConfig(SelectedPort.PortName, SelectedBaud));
+            void setupChartAndPort(object s2, EventArgs e2) {
+                SetupChart();
+                SetupPort(new SerialPortConfig(SelectedPort.PortName, SelectedBaud));
+            };
             bool ignoreChanges = false;
             port.DropDown += (s2, e2) =>
             {
@@ -75,22 +76,35 @@ namespace SerialPlotAndLog
                 RepopulatePortSelect();
                 ignoreChanges = false;
             };
-            port.SelectedIndexChanged += (s2, e2) => { if (!ignoreChanges) eh(s2, e2); };
-            baud.SelectedIndexChanged += eh;
+            port.SelectedIndexChanged += (s2, e2) => { if (!ignoreChanges) setupChartAndPort(s2, e2); };
+            baud.SelectedIndexChanged += setupChartAndPort;
             resetChart.Click += (object s2, EventArgs e2) => ResetChartOnly();
             resetArduino.Click += (s2, e2) =>
             {
-                _ser.DtrEnable = true;
-                Thread.Sleep(10);
-                _ser.DtrEnable = false;
-                if (alsoResetChart.Checked)
-                    eh(null, new EventArgs());
+                if (SetupPort(new SerialPortConfig(SelectedPort.PortName, SelectedBaud), true) && alsoResetChart.Checked)
+                    SetupChart();
+                else
+                    error.Text = "No port selected.";
             };
             new ToolTip().SetToolTip(error, "Double click to copy error text to the clipboard.");
             error.DoubleClick += (s2, e2) => Clipboard.SetText(error.Text);
             _timer.Tick += _timer_Tick;
             _timer.Interval = 50;
             _timer.Enabled = true;
+
+            this.grpOptions.Visible = false;
+            this.showOptions.Click += (s2, e2) =>
+            {
+                grpOptions.Visible = true;
+                grpOptions.Focus();
+            };
+            this.saveAndCloseOptions.Click += (s2, e2) => grpOptions.Visible = false;
+            this.grpOptions.Leave += (s2, e2) => grpOptions.Visible = false;
+
+            // show, in case we're doing a file open dialog
+            this.Show();
+            SetupChart();
+            SetupPort(_current);
         }
 
         private void CloseHandles()
@@ -127,9 +141,12 @@ namespace SerialPlotAndLog
             public AugmentedSeries(Form form, int seriesNumber)
             {
                 // there wasn't an easy way to get the legend dimensions
-                CtlLabel = new Label { Text = $"series {seriesNumber}", TextAlign = ContentAlignment.MiddleRight, Left = form.Width - 240, Top = 300 + seriesNumber * 30 + 6, BackColor = Color.White, Anchor = AnchorStyles.Right };
-                CtlTextBox = new TextBox { Left = form.Width - 140, Top = 300 + seriesNumber * 30, Width = 70, Anchor = AnchorStyles.Right };
+                // BUG: this might render badly (text ~2x proper size) on machines outputting solely to 72 DPI displays
                 CtlCheckBox = new CheckBox { Text = "", Left = form.Width - 50, Top = 300 + seriesNumber * 30 + 6, Anchor = AnchorStyles.Right };
+                CtlTextBox = new TextBox { Left = CtlCheckBox.Left - 70 - 5, Top = 300 + seriesNumber * 30, Width = 70, Anchor = AnchorStyles.Right };
+                CtlLabel = new Label { TextAlign = ContentAlignment.MiddleRight, Top = 300 + seriesNumber * 30 + 6, AutoSize = true, BackColor = Color.White, Anchor = AnchorStyles.Right };
+                
+                ChangeLabel($"series {seriesNumber + 1}");
 
                 CtlTextBox.Font = new Font(CtlTextBox.Font.FontFamily, 12);
 
@@ -153,6 +170,8 @@ namespace SerialPlotAndLog
             {
                 this.LegendText = text;
                 CtlLabel.Text = text;
+                // on initialization, CtlLabel.Width does not change, perhaps because it hasn't yet been rendered
+                CtlLabel.Left = CtlTextBox.Left - 3 - TextRenderer.MeasureText(text, CtlLabel.Font).Width;
             }
 
             public void AddPoint(int index, string s, double f)
@@ -264,36 +283,54 @@ namespace SerialPlotAndLog
             Monitor.Exit(_timer);
         }
 
-        private void SetupChart(SerialPortConfig config)
+        private string GetLogFullname()
         {
+            string filename;
+
+            if (askFilenameOnReset.Checked)
+            {
+                var dlg = new OpenFileDialog()
+                {
+                    FileName = string.Format("{0:yyyyMMdd}_", DateTime.Now),
+                    AddExtension = true,
+                    CheckFileExists = false,
+                    DefaultExt = "txt",
+                };
+
+                if (dlg.ShowDialog() == DialogResult.OK)
+                    filename = dlg.FileName;
+                else
+                    return null;
+
+                if (File.Exists(filename) && MessageBox.Show($"{filename} already exists; overwrite?", "File already exists", MessageBoxButtons.OKCancel, MessageBoxIcon.Exclamation) != DialogResult.OK)
+                    return null;
+
+                return filename;
+            }
+            else
+            {
+                filename = string.Format("{0:yyyy-MM-dd_HH-mm-ss}_SerialPlotAndLog.txt", DateTime.Now);
+                return Path.Combine(Environment.CurrentDirectory, filename);
+            }
+        }
+
+        private bool SetupPort(SerialPortConfig config, bool reset = false)
+        {
+            string fullname = GetLogFullname();
+
+            if (fullname == null)
+            {
+                error.Text = $"No file chosen and '{askFilenameOnReset.Text}' checked; no data being collected.";
+                return false;
+            }
+
             CloseHandles();
             // the only way to clear in .NET 4.8
             while (_queue.TryDequeue(out string ignored))
                 ;
 
             if (string.IsNullOrEmpty(config.PortName) || config.BaudRate <= 0)
-                return;
-
-            if (_series != null)
-                foreach (var ser in _series.Values)
-                    ser.RemoveControls();
-
-            _dataIndex = 0;
-            error.Text = null;
-            lastData.Text = null;
-
-            chart.ChartAreas.Clear();
-            chart.Series.Clear();
-
-            _area = new ChartArea();
-            _minimumYValueSet = false;
-            chart.ChartAreas.Add(_area);
-            _series = new DefaultDictionary<int, AugmentedSeries>(n =>
-                {
-                    var newS = new AugmentedSeries(this, n) { ChartType = SeriesChartType.Line, BorderWidth = 2 };
-                    chart.Series.Add(newS);
-                    return newS;
-                });
+                return false;
 
             try
             {
@@ -303,23 +340,24 @@ namespace SerialPlotAndLog
             catch (Exception ex)
             {
                 error.Text = ex.Message;
-                return;
+                return false;
             }
 
-            var area = chart.ChartAreas[0];
-            area.CursorX.AutoScroll = true;
-            area.AxisX.ScaleView.Zoomable = true;
-            area.AxisX.ScaleView.SizeType = DateTimeIntervalType.Number;
-            area.AxisX.ScrollBar.ButtonStyle = ScrollBarButtonStyles.SmallScroll;
-            //area.AxisX.ScaleView.SmallScrollSize = MaxSamples / SamplesPerSecond;
+            if (reset)
+            {
+                _ser.DtrEnable = true;
+                Thread.Sleep(10);
+                _ser.DtrEnable = false;
+                // we could have received data since calling CloseHandles()
+                _ser.DiscardInBuffer();
+            }
 
             string residual = "";
 
             try
             {
-                string filename = string.Format("{0:yyyy-MM-dd_HH-mm-ss}_SerialPlotAndLog.txt", DateTime.Now);
-                this.Text = string.Format("SerialPlotAndLog - {0}", Path.Combine(Environment.CurrentDirectory, filename));
-                _fs = new FileStream(filename, FileMode.Create);
+                this.Text = string.Format("SerialPlotAndLog - {0}", fullname);
+                _fs = new FileStream(fullname, FileMode.Create);
                 // consider https://www.sparxeng.com/blog/software/reading-lines-serial-port
                 SetupDataReceive(_ser, by =>
                 {
@@ -345,6 +383,39 @@ namespace SerialPlotAndLog
                 _fs = null;
                 throw;
             }
+
+            return true;
+        }
+
+        private void SetupChart()
+        {
+            if (_series != null)
+                foreach (var ser in _series.Values)
+                    ser.RemoveControls();
+
+            _dataIndex = 0;
+            error.Text = null;
+            lastData.Text = null;
+
+            chart.ChartAreas.Clear();
+            chart.Series.Clear();
+
+            _area = new ChartArea();
+            _minimumYValueSet = false;
+            chart.ChartAreas.Add(_area);
+            _series = new DefaultDictionary<int, AugmentedSeries>(n =>
+                {
+                    var newS = new AugmentedSeries(this, n) { ChartType = SeriesChartType.Line, BorderWidth = 2 };
+                    chart.Series.Add(newS);
+                    return newS;
+                });
+
+            var area = chart.ChartAreas[0];
+            area.CursorX.AutoScroll = true;
+            area.AxisX.ScaleView.Zoomable = true;
+            area.AxisX.ScaleView.SizeType = DateTimeIntervalType.Number;
+            area.AxisX.ScrollBar.ButtonStyle = ScrollBarButtonStyles.SmallScroll;
+            //area.AxisX.ScaleView.SmallScrollSize = MaxSamples / SamplesPerSecond;
         }
 
         private void ResetChartOnly()
@@ -361,8 +432,8 @@ namespace SerialPlotAndLog
             // not going to do this for now, to match position in file
             //_dataIndex = 0;
             _minimumYValueSet = false;
-            error.Text = null;
-            lastData.Text = null;
+            error.Text = "";
+            lastData.Text = "";
             _visibleStartIndex = _dataIndex;
             var area = chart.ChartAreas.First();
             area.AxisX.Minimum = Math.Floor(_visibleStartIndex / SamplesPerSecond);
@@ -490,7 +561,6 @@ namespace SerialPlotAndLog
         private SerialPortInfo[] RepopulatePortSelect()
         {
             var dummy = new SerialPortInfo("", "disconnect");
-
             var ports = new[] { dummy }.Concat(SerialPortInfo.GetSerialPorts()).ToArray();
             var h = new HashSet<SerialPortInfo>(ports);
             var lastSelected = port.SelectedIndex;
